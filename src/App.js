@@ -4,13 +4,10 @@ import ChatRoom from './components/ChatRoom';
 import RoomList from './components/RoomList';
 import UserLogin from './components/UserLogin';
 import OnlineUsersList from './components/OnlineUsersList';
-import './styles.css'; 
+import './styles.css';
 
 const socket = io(process.env.REACT_APP_BACKEND_URL);
-
 console.log("ENV BACKEND:", process.env.REACT_APP_BACKEND_URL);
-
-
 
 function App() {
   const [username, setUsername] = useState('');
@@ -21,6 +18,11 @@ function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [typingUsers, setTypingUsers] = useState([]);
   const [notifications, setNotifications] = useState([]);
+  
+  // ===== NEW: Mobile navigation states =====
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  const [showChatOnMobile, setShowChatOnMobile] = useState(false);
+  // ==========================================
 
   useEffect(() => {
     socket.on('message', (data) => {
@@ -50,6 +52,7 @@ function App() {
       } else {
         setTypingUsers(prev => prev.filter(user => user !== typingUser));
       }
+
       setTimeout(() => {
         setTypingUsers(prev => prev.filter(user => user !== typingUser));
       }, 3000);
@@ -72,6 +75,49 @@ function App() {
 
   useEffect(() => {
     fetchRooms();
+  }, []);
+
+  // ===== NEW: Mobile resize handler =====
+  useEffect(() => {
+    const handleResize = () => {
+      const newIsMobile = window.innerWidth <= 768;
+      setIsMobile(newIsMobile);
+      
+      // Reset mobile chat view when switching to desktop
+      if (!newIsMobile) {
+        setShowChatOnMobile(false);
+      }
+    };
+    
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  // =====================================
+
+  // Handle mobile sidebar close icon click
+  useEffect(() => {
+    const handleSidebarClose = (e) => {
+      if (window.innerWidth <= 768) {
+        const sidebar = document.querySelector('.sidebar.active');
+        if (sidebar && e.target === sidebar) {
+          const rect = sidebar.getBoundingClientRect();
+          const closeIconArea = {
+            left: rect.right - 50,
+            right: rect.right - 10,
+            top: rect.top + 10,
+            bottom: rect.top + 50
+          };
+
+          if (e.clientX >= closeIconArea.left && e.clientX <= closeIconArea.right &&
+              e.clientY >= closeIconArea.top && e.clientY <= closeIconArea.bottom) {
+            sidebar.classList.remove('active');
+          }
+        }
+      }
+    };
+
+    document.addEventListener('click', handleSidebarClose);
+    return () => document.removeEventListener('click', handleSidebarClose);
   }, []);
 
   const fetchRooms = async () => {
@@ -97,14 +143,22 @@ function App() {
     setIsLoggedIn(true);
   };
 
+  // ===== MODIFIED: handleJoinRoom to include mobile navigation =====
   const handleJoinRoom = (roomName) => {
     if (currentRoom) {
       socket.emit('leaveRoom', { username, room: currentRoom });
     }
+
     setCurrentRoom(roomName);
     setMessages([]);
     socket.emit('joinRoom', { username, room: roomName });
+    
+    // NEW: On mobile, show chat when room is selected
+    if (isMobile) {
+      setShowChatOnMobile(true);
+    }
   };
+  // =================================================================
 
   const handleCreateRoom = async (roomName) => {
     try {
@@ -149,58 +203,90 @@ function App() {
     }
   };
 
+  // ===== NEW: Mobile back button handler =====
+  const handleBackToRooms = () => {
+    setShowChatOnMobile(false);
+  };
+  // =============================================
+
   if (!isLoggedIn) {
     return <UserLogin onLogin={handleLogin} />;
   }
 
   return (
     <div className="app-container">
-      <header className="app-header">
-        <h1 className="app-title">Real-Time Chat App</h1>
-        <p className="app-subtitle">Welcome, {username}!</p>
-        {currentRoom && <p className="current-room">Room: {currentRoom}</p>}
-      </header>
-
-      {notifications.length > 0 && (
-        <div className="notification-container">
-          {notifications.map(notif => (
-            <div key={notif.id} className="notification">
-              {notif.message}
-            </div>
-          ))}
+      <div className="app-header">
+        <div className="app-title">
+          RealTime Chat
+          <div className="app-subtitle">Connect instantly with friends</div>
         </div>
-      )}
+        <div className="user-info">
+          <span>Hello, {username}!</span>
+          <div className="user-avatar">
+            {username.charAt(0).toUpperCase()}
+          </div>
+        </div>
+      </div>
 
-      <main className="app-main">
-        <aside className="sidebar room-list">
+      {/* ===== MODIFIED: Main area with mobile navigation ===== */}
+      <div className="app-main">
+        {/* Left sidebar - RoomList (hidden on mobile when chat is shown) */}
+        <div className={`sidebar ${isMobile && showChatOnMobile ? 'mobile-hidden' : ''}`}>
           <RoomList
             rooms={rooms}
             currentRoom={currentRoom}
             onJoinRoom={handleJoinRoom}
             onCreateRoom={handleCreateRoom}
           />
-        </aside>
+        </div>
 
-        <section className="chat-area">
+        {/* Center - Chat Area */}
+        <div className={`chat-area ${isMobile && !showChatOnMobile ? 'mobile-hidden' : ''}`}>
+          {/* NEW: Mobile back button */}
+          {isMobile && showChatOnMobile && currentRoom && (
+            <button className="mobile-back-btn" onClick={handleBackToRooms}>
+              ← Back to Rooms
+            </button>
+          )}
+          
           {currentRoom ? (
-            <ChatRoom
-              messages={messages}
-              onSendMessage={handleSendMessage}
-              onTyping={handleTyping}
-              currentUser={username}
-              typingUsers={typingUsers}
-            />
+            <>
+              <div className="chat-header">
+                <h2>#{currentRoom}</h2>
+                <span>{onlineUsers.length} users online</span>
+              </div>
+              <ChatRoom
+                messages={messages}
+                onSendMessage={handleSendMessage}
+                onTyping={handleTyping}
+                currentUser={username}
+                typingUsers={typingUsers}
+              />
+            </>
           ) : (
             <div className="no-room-selected">
-              <p>Select a room to start chatting</p>
+              <h2>Select a room to start chatting</h2>
+              <p>Choose a room from the list to begin your conversation</p>
             </div>
           )}
-        </section>
+        </div>
 
-        <aside className="sidebar online-users">
-          <OnlineUsersList users={onlineUsers} currentUser={username} />
-        </aside>
-      </main>
+        {/* Right sidebar - Online Users (hidden on mobile) */}
+        <div className={`sidebar ${isMobile ? 'mobile-hidden' : ''}`}>
+          <OnlineUsersList users={onlineUsers} />
+        </div>
+      </div>
+      {/* ================================================== */}
+
+      {/* Notifications */}
+      <div className="notification-container">
+        {notifications.map(notification => (
+          <div key={notification.id} className="notification">
+            <div className="notification-icon">👋</div>
+            <div>{notification.message}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
